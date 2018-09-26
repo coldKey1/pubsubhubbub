@@ -23,7 +23,7 @@ var request = require('request'),
  * @param {String} [headers] Custom headers to use for all HTTP requests
  * @return {Object} A PubSubHubbub server object
  */
-module.exports.createServer = function(options) {
+module.exports.createServer = function (options) {
     return new PubSubHubbub(options);
 };
 
@@ -70,8 +70,8 @@ utillib.inherits(PubSubHubbub, Stream);
  * @param  {Function} next Optional connect middleware next()
  * @return {Function} Middleware handler
  */
-PubSubHubbub.prototype.listener = function() {
-    return function(req, res, next) {
+PubSubHubbub.prototype.listener = function () {
+    return function (req, res, next) {
         this._onRequest(req, res, next);
     }.bind(this);
 };
@@ -81,7 +81,7 @@ PubSubHubbub.prototype.listener = function() {
  *
  * Uses the same arguments as http#listen (port, host, callback)
  */
-PubSubHubbub.prototype.listen = function() {
+PubSubHubbub.prototype.listen = function () {
     var args = Array.prototype.slice.call(arguments);
     this.port = args[0];
 
@@ -100,8 +100,8 @@ PubSubHubbub.prototype.listen = function() {
  * @param {String} [callbackUrl] Define callback url for the hub, do not use the default
  * @param {Function} [callback] Callback function, might not be very useful
  */
-PubSubHubbub.prototype.subscribe = function(topic, hub, callbackUrl, callback) {
-    this.setSubscription('subscribe', topic, hub, callbackUrl, callback);
+PubSubHubbub.prototype.subscribe = function (topic, hub, lease_seconds, link_id, callbackUrl, callback) {
+    this.setSubscription('subscribe', topic, hub, lease_seconds, link_id, callbackUrl, callback);
 };
 
 /**
@@ -112,8 +112,8 @@ PubSubHubbub.prototype.subscribe = function(topic, hub, callbackUrl, callback) {
  * @param {String} [callbackUrl] Define callback url for the hub, do not use the default
  * @param {Function} [callback] Callback function, might not be very useful
  */
-PubSubHubbub.prototype.unsubscribe = function(topic, hub, callbackUrl, callback) {
-    this.setSubscription('unsubscribe', topic, hub, callbackUrl, callback);
+PubSubHubbub.prototype.unsubscribe = function (topic, hub, lease_seconds, callbackUrl, callback) {
+    this.setSubscription('unsubscribe', topic, hub, lease_seconds, callbackUrl, callback);
 };
 
 /**
@@ -125,7 +125,7 @@ PubSubHubbub.prototype.unsubscribe = function(topic, hub, callbackUrl, callback)
  * @param {String} [callbackUrl] Define callback url for the hub, do not use the default
  * @param {Function} [callback] Callback function, might not be very useful
  */
-PubSubHubbub.prototype.setSubscription = function(mode, topic, hub, callbackUrl, callback) {
+PubSubHubbub.prototype.setSubscription = function (mode, topic, hub, lease_seconds, link_id, callbackUrl, callback) {
 
     if (!callback && typeof callbackUrl === 'function') {
         callback = callbackUrl;
@@ -137,21 +137,24 @@ PubSubHubbub.prototype.setSubscription = function(mode, topic, hub, callbackUrl,
         (this.callbackUrl.replace(/^https?:\/\//i, '').match(/\//) ? '' : '/') +
         (this.callbackUrl.match(/\?/) ? '&' : '?') +
         'topic=' + encodeURIComponent(topic) +
+        '&link_id=' + link_id +
         '&hub=' + encodeURIComponent(hub);
 
     var form = {
-            'hub.callback': callbackUrl,
-            'hub.mode': mode,
-            'hub.topic': topic,
-            'hub.verify': 'async'
-        },
-
-        postParams = {
-            url: hub,
-            headers: this.headers,
-            form: form,
-            encoding: 'utf-8'
-        };
+        'hub.callback': callbackUrl,
+        'hub.mode': mode,
+        'hub.topic': topic,
+        'hub.verify': 'async'
+    }
+    if (lease_seconds) {
+        form['hub.lease_seconds'] = lease_seconds;
+    }
+    var postParams = {
+        url: hub,
+        headers: this.headers,
+        form: form,
+        encoding: 'utf-8'
+    };
 
     if (this.auth) {
         postParams.auth = this.auth;
@@ -162,7 +165,7 @@ PubSubHubbub.prototype.setSubscription = function(mode, topic, hub, callbackUrl,
         form['hub.secret'] = crypto.createHmac('sha1', this.secret).update(topic).digest('hex');
     }
 
-    request.post(postParams, function(error, response, responseBody) {
+    request.post(postParams, function (error, response, responseBody) {
 
         if (error) {
             if (callback) {
@@ -202,7 +205,7 @@ PubSubHubbub.prototype.setSubscription = function(mode, topic, hub, callbackUrl,
  * @param {Object} res HTTP Response object
  * @param {Function} next Optional connect middleware next()
  */
-PubSubHubbub.prototype._onRequest = function(req, res, next) {
+PubSubHubbub.prototype._onRequest = function (req, res, next) {
     switch (req.method) {
         case 'GET':
             return this._onGetRequest(req, res, next);
@@ -219,7 +222,7 @@ PubSubHubbub.prototype._onRequest = function(req, res, next) {
  * @event
  * @param {Error} error Error object
  */
-PubSubHubbub.prototype._onError = function(error) {
+PubSubHubbub.prototype._onError = function (error) {
     if (error.syscall === 'listen') {
         error.message = 'Failed to start listening on port ' + this.port + ' (' + error.code + ')';
         this.emit('error', error);
@@ -233,7 +236,7 @@ PubSubHubbub.prototype._onError = function(error) {
  *
  * @event
  */
-PubSubHubbub.prototype._onListening = function() {
+PubSubHubbub.prototype._onListening = function () {
     this.emit('listen');
 };
 
@@ -245,10 +248,9 @@ PubSubHubbub.prototype._onListening = function() {
  * @param {Object} res HTTP Response object
  * @param {Function} next Optional connect middleware next()
  */
-PubSubHubbub.prototype._onGetRequest = function(req, res, next) {
+PubSubHubbub.prototype._onGetRequest = function (req, res, next) {
     var params = urllib.parse(req.url, true, true),
         data;
-
     // Does not seem to be a valid PubSubHubbub request
     if (!params.query['hub.topic'] || !params.query['hub.mode']) {
         return this._sendError(req, res, next, 400, 'Bad Request');
@@ -275,8 +277,10 @@ PubSubHubbub.prototype._onGetRequest = function(req, res, next) {
         case 'unsubscribe':
             data = {
                 lease: Number(params.query['hub.lease_seconds'] || 0) + Math.round(Date.now() / 1000),
+                lease_seconds: Number(params.query['hub.lease_seconds'] || 0) + Math.round(Date.now() / 1000),
                 topic: params.query['hub.topic'],
-                hub: params.query.hub
+                hub: params.query.hub,
+                link_id: params.query.link_id
             };
             if (next) {
                 res.statusCode = 200;
@@ -306,7 +310,7 @@ PubSubHubbub.prototype._onGetRequest = function(req, res, next) {
  * @param {Object} res HTTP Response object
  * @param {Function} next Optional connect middleware next()
  */
-PubSubHubbub.prototype._onPostRequest = function(req, res, next) {
+PubSubHubbub.prototype._onPostRequest = function (req, res, next) {
     var bodyChunks = [],
         params = urllib.parse(req.url, true, true),
         topic = params && params.query && params.query.topic,
@@ -317,16 +321,16 @@ PubSubHubbub.prototype._onPostRequest = function(req, res, next) {
 
     // v0.4 hubs have a link header that includes both the topic url and hub url
     (req.headers && req.headers.link || '').
-    replace(/<([^>]+)>\s*(?:;\s*rel=["']([^"']+)["'])?/gi, function(o, url, rel) {
-        switch ((rel || '').toLowerCase()) {
-            case 'self':
-                topic = url;
-                break;
-            case 'hub':
-                hub = url;
-                break;
-        }
-    });
+        replace(/<([^>]+)>\s*(?:;\s*rel=["']([^"']+)["'])?/gi, function (o, url, rel) {
+            switch ((rel || '').toLowerCase()) {
+                case 'self':
+                    topic = url;
+                    break;
+                case 'hub':
+                    hub = url;
+                    break;
+            }
+        });
 
     if (!topic) {
         return this._sendError(req, res, next, 400, 'Bad Request');
@@ -349,7 +353,7 @@ PubSubHubbub.prototype._onPostRequest = function(req, res, next) {
         }
     }
 
-    req.on('data', (function(chunk) {
+    req.on('data', (function (chunk) {
         if (!chunk || !chunk.length || tooLarge) {
             return;
         }
@@ -367,7 +371,7 @@ PubSubHubbub.prototype._onPostRequest = function(req, res, next) {
         chunk = null;
     }).bind(this));
 
-    req.on('end', (function() {
+    req.on('end', (function () {
         if (tooLarge) {
             return this._sendError(req, res, next, 413, 'Request Entity Too Large');
         }
@@ -417,7 +421,7 @@ PubSubHubbub.prototype._onPostRequest = function(req, res, next) {
  * @param {Number} code HTTP response status
  * @param {String} message Error message to display
  */
-PubSubHubbub.prototype._sendError = function(req, res, next, code, message) {
+PubSubHubbub.prototype._sendError = function (req, res, next, code, message) {
     var err;
     if (next) {
         err = new Error(message);
